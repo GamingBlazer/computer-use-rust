@@ -1,5 +1,7 @@
 """Regression tests for the v0.3.2 security fixes (docs/SECURITY-REVIEW-0.3.1.md): H1-H4, H6, H7, M1-M6, L1-L5, and
-the v0.3.3 fixes (docs/SECURITY-REVIEW-0.3.2.md): N1-N4, L1-L4.
+the v0.3.3 fixes (docs/SECURITY-REVIEW-0.3.2.md): N1-N4, L1-L4, and the v0.3.4 fixes (the "Known limitations after v0.3.3"
+section of that file): the Esc go-ahead only in the AI app, long open_app names, the idle wait ending on a stop or a
+cancellation, the title oracle, and protected windows embedded as child windows.
 
 Everything runs against windows this test creates itself (tiny WinForms programs, some under the exe names of
 forbidden apps) and, where a real structure matters, built-in apps that hold no secrets (Calculator, Windows
@@ -10,8 +12,8 @@ here uses `taskkill /IM`. Each server runs from a private copy of the exe with i
 Usage: python -I security_test.py [path\\to\\desktop-control.exe]
   DESKTOP_CONTROL_DEBUG_EXE=<debug build>  also runs the sections that need the test hooks of a debug build
   (a raised Esc stop, a simulated user touch, dropped hooks, "no AI app found"); without it they are skipped.
-  SEC_ONLY=n1,n4,...  runs only the named sections (h1_h2 h3 h6 h7_m5 m2 m4 l1_l3 n1 n4 l2 l3 l4 and, with a debug build,
-  h4 m3 m6 l2h l5 n2 n3 l1l2d), so that a run can be split into pieces of under three minutes.
+  SEC_ONLY=n1,n4,...  runs only the named sections (h1_h2 h3 h6 h7_m5 m2 m4 l1_l3 n1 n4 l2 l3 l4 v34_open v34_cancel v34_apps and, with a
+  debug build, h4 m3 m6 l2h l5 n2 n2b n3 l1l2d v34_idle v34_unknown v34_cut), so that a run can be split into pieces of under three minutes.
 
 The user's clipboard is saved before any section starts and put back at the end, even on failure (every memory format;
 see clipguard.py, which the runner of the whole list also uses between suites).
@@ -311,7 +313,7 @@ def run_sections():
         finally:
             plain_a.close()
             other_b.close()
-    for key, fn in (("h3", h3), ("h6", h6), ("h7_m5", h7_m5), ("m2", m2), ("m4", m4), ("l1_l3", l1_l3), ("n1", n1), ("n4", n4), ("l2", l2_titles), ("l3", l3_paths)):
+    for key, fn in (("h3", h3), ("h6", h6), ("h7_m5", h7_m5), ("m2", m2), ("m4", m4), ("l1_l3", l1_l3), ("n1", n1), ("n4", n4), ("l2", l2_titles), ("l3", l3_paths), ("v34_open", v34_open), ("v34_cancel", v34_cancel), ("v34_apps", v34_apps)):
         if wanted(key):
             fn()
     if wanted("l4"):
@@ -319,7 +321,7 @@ def run_sections():
     if DBG and os.path.exists(DBG):
         debug_sections()
     elif not os.environ.get("SEC_ONLY"):
-        for w in ("H4/N2 (Esc stop: not cleared by finish, turn-ended, waiting or injected input; cleared only with physical input)", "N3 (a script cannot get round the takeover guard)", "M3 (takeover persists)", "M6 (no-host warning and fallback protection)", "L2 (dropped hooks are re-installed)", "L5 (finish summary not on stderr)", "v0.3.3 L1 (masking an unknown program)"):
+        for w in ("H4/N2 (Esc stop: not cleared by finish, turn-ended, waiting or injected input; cleared only with physical input)", "N3 (a script cannot get round the takeover guard)", "M3 (takeover persists)", "M6 (no-host warning and fallback protection)", "L2 (dropped hooks are re-installed)", "L5 (finish summary not on stderr)", "v0.3.3 L1 (masking an unknown program)", "v0.3.4 N2 (keys in the AI app only, after turn-ended)", "v0.3.4 idle wait ends on a stop", "v0.3.4 title oracle and embedded masking for an unknown program"):
             skip(w + ": needs DESKTOP_CONTROL_DEBUG_EXE")
     STANDIN.pop().close()
 
@@ -355,7 +357,7 @@ def h1_h2(a, b):
 
         section("H2: reading a forbidden app is refused")
         t, imgs, err = s.call("screenshot", {"window": "DC Sec Vault"})
-        check(err and imgs == 0 and "refusing to control keepassxc.exe" in t, "screenshot(window=<password manager>) is refused", t[:200])
+        check(err and imgs == 0 and t.startswith("No open window with"), "screenshot(window=<password manager>) gets no picture (v0.3.4: answered as no matching window)", t[:200])
         v.front()
         check(fg_is(v), "the password-manager stand-in is in front")
         s.call("screenshot", {"monitor": 1})  # ends the window view: reading follows the window in front
@@ -364,7 +366,7 @@ def h1_h2(a, b):
         t, _, err = s.call("read_text", {})
         check("secret" not in t.lower() and "VAULTMARKER" not in t, "read_text does not return its text", t[:200])
         t, _, err = s.call("find_text", {"text": "VAULTMARKERTEXT", "window": "DC Sec Vault"})
-        check(err and "keepassxc.exe" in t, "find_text(window=...) on it is refused", t[:200])
+        check(err and "keepassxc.exe" not in t and ("No open window with" in t or "refus" in t.lower()), "find_text(window=...) on it reads nothing (v0.3.4: no matching window)", t[:200])
         a.front()
         time.sleep(0.5)
         t, _, err = s.call("find_text", {"text": "VAULTMARKERTEXT", "monitor": 1})
@@ -458,7 +460,7 @@ def h3():
         check(real == "sechealthui.exe", "Windows Security's program is SecHealthUI.exe, inside an ApplicationFrameHost window", f"top exe {testutil.exe_of(top)}, core {real}")
         s = server(EXE)
         t, imgs, err = s.call("screenshot", {"window": "Windows Security"})
-        check(err and imgs == 0 and "sechealthui.exe" in t and "security or password-manager" in t, "screenshot(window='Windows Security') is refused", t[:250])
+        check(err and imgs == 0 and t.startswith("No open window with"), "screenshot(window='Windows Security') gets no picture (v0.3.4: answered as no matching window)", t[:250])
         t, _, err = s.call("list_apps", {})
         check("Windows Security" not in t, "list_apps hides its title", t[:300])
         s.close()
@@ -735,7 +737,7 @@ def n2(home):
         s.call("list_apps", {})
         # stop and a "physical key" at the same instant: input inside the 300 ms after the stop is the Esc itself, not a go-ahead
         open(stopf, "w").close()
-        open(physf, "w").close()
+        phys(physf, home.hwnd)
         check(consumed(stopf) and consumed(physf), "the debug hook consumed the stop and the key trigger")
         t, _, err = s.call("list_apps", {})
         check(err and t.startswith("Computer Use was stopped"), "stopped", t[:100])
@@ -761,8 +763,8 @@ def n2(home):
         time.sleep(0.5)
         t, _, err = s.call("list_apps", {})
         check(err and t.startswith("Computer Use was stopped"), "injected key presses plus turn-ended do not lift it", t[:100])
-        # the user: a physical key at least 300 ms after the stop, with the turn ended
-        open(physf, "w").close()
+        # the user: a physical key in the AI app at least 300 ms after the stop, after the turn ended
+        phys(physf, home.hwnd)
         check(consumed(physf), "the debug hook consumed the key trigger")
         time.sleep(0.3)
         t, _, err = s.call("list_apps", {})
@@ -779,13 +781,106 @@ def n2(home):
         t, _, err = s.call("status", {})
         check("stopped by the user" in t and "yes" in t.split("stopped by the user")[1][:60], "31 s without any call but no physical input: still stopped", t[-300:])
         time.sleep(31)
-        open(physf, "w").close()
+        phys(physf, 1)  # a key while some other window is in front, after the quiet period
         consumed(physf)
         time.sleep(1.5)
         t, _, err = s.call("list_apps", {})
-        check(not err, "31 s of quiet plus a physical key afterwards lifts it (no tool call was needed)", t[:150])
+        check(err and t.startswith("Computer Use was stopped"), "31 s of quiet plus a key in another app does not lift it (v0.3.4)", t[:100])
+        time.sleep(31)
+        phys(physf, home.hwnd)
+        consumed(physf)
+        time.sleep(1.5)
+        t, _, err = s.call("list_apps", {})
+        check(not err, "31 s of quiet plus a physical key in the AI app afterwards lifts it (no tool call was needed)", t[:150])
     finally:
         s.close()
+
+
+def n2b(home):
+    section("v0.3.4 N2: a key or click counts only in the AI app's window, and on the turn-ended path only after the touch (debug build)")
+    p = instance(DBG)
+    d = os.path.dirname(p)
+    stopf, env = stop_file_env(d)
+    physf = os.path.join(d, "phys.flag")
+    env["DC_TEST_PHYSICAL_FILE"] = physf
+    other = Dummy("dcother.exe", "DC Sec N2B Other", "", "plain", 20, 20)
+    home.front()
+    check(fg_is(home), "the stand-in for the AI app is in front when the task starts (it becomes the fallback host)", testutil.title_of(testutil.fg_hwnd()))
+    s = Server(p, env=env, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+
+    def consumed(f):
+        return wait_for(lambda: not os.path.exists(f), 5)
+
+    def refused_now():
+        t, _, err = s.call("list_apps", {})
+        return err and t.startswith("Computer Use was stopped"), t[:100]
+
+    def turn_ended():
+        return subprocess.run([p, "turn-ended"], capture_output=True, timeout=20, creationflags=0x08000000).returncode == 0
+
+    try:
+        s.call("list_apps", {})  # task start: the window in front (the stand-in for the AI app) is the fallback host
+        open(stopf, "w").close()
+        check(consumed(stopf), "the debug hook consumed the stop trigger")
+        time.sleep(0.6)  # past the grace period
+        # 1. a key in the AI app BEFORE the agent's turn-ended touch: the touch comes later, so the key does not count
+        phys(physf, home.hwnd)
+        check(consumed(physf), "a physical key in the AI app was seen by the hook")
+        time.sleep(0.5)
+        check(turn_ended(), "...then the agent touches turn-ended (after that key)")
+        time.sleep(0.4)
+        ok, d1 = refused_now()
+        check(ok, "a key in the AI app that came before the turn-ended touch does not lift the stop", d1)
+        # 2. a key in another app, after the touch: not the user's answer to the AI
+        phys(physf, other.hwnd)
+        check(consumed(physf), "a physical key in another app was seen by the hook")
+        time.sleep(0.3)
+        ok, d2 = refused_now()
+        check(ok, "a key in another app after turn-ended does not lift the stop", d2)
+        # 3. a key in the AI app after the touch lifts it
+        phys(physf, home.hwnd)
+        check(consumed(physf), "a physical key in the AI app after the touch was seen")
+        time.sleep(0.3)
+        t, _, err = s.call("list_apps", {})
+        check(not err, "a key in the AI app after the turn-ended touch lifts the stop", t[:150])
+
+        # v0.3.4 follow-up N1: what counts as an answer while the AI app is in front
+        r = home.rect()
+        outside = "click=%d,%d" % (r.right + 40, r.bottom + 40)
+        inside = "click=%d,%d" % ((r.left + r.right) // 2, (r.top + r.bottom) // 2)
+        home.front()
+        open(stopf, "w").close()
+        check(consumed(stopf), "a second stop was raised")
+        time.sleep(0.6)
+        check(turn_ended(), "the turn-ended file was touched after it")
+        time.sleep(0.4)
+        for label, extra in (("a click outside the AI app's window rectangle while the AI app is in front (the click into another app)", outside),
+                             ("Alt", "vk=18 mods=1"), ("Alt+Tab", "vk=9 mods=1"), ("the Windows key", "vk=91"), ("Win+R", "vk=82 mods=1"),
+                             ("Shift", "vk=16"), ("Ctrl", "vk=17")):
+            phys(physf, home.hwnd, extra)
+            consumed(physf)
+            time.sleep(0.3)
+            ok, d3 = refused_now()
+            check(ok, f"{label} does not lift the stop", d3)
+        phys(physf, home.hwnd, "vk=65")
+        consumed(physf)
+        time.sleep(0.3)
+        t, _, err = s.call("list_apps", {})
+        check(not err, "a plain key in the AI app does (control)", t[:150])
+        home.front()
+        open(stopf, "w").close()
+        consumed(stopf)
+        time.sleep(0.6)
+        turn_ended()
+        time.sleep(0.4)
+        phys(physf, home.hwnd, inside)
+        consumed(physf)
+        time.sleep(0.3)
+        t, _, err = s.call("list_apps", {})
+        check(not err, "a click inside the AI app's window lifts the stop", t[:150])
+    finally:
+        s.close()
+        other.close()
 
 
 def n3(home):
@@ -835,6 +930,118 @@ def n3(home):
     finally:
         s.close()
         t_win.close()
+
+
+def v34_open():
+    section("v0.3.4: open_app refuses a name over 260 characters before looking at any installed app")
+    s = server(EXE)
+    try:
+        for n in (261, 5000, 200000):
+            t0 = time.time()
+            t, _, err = s.call("open_app", {"name": "a" * n, "observe": "none"}, timeout=30)
+            dt = time.time() - t0
+            check(err and "at most 260 characters" in t and "installed app" not in t and len(t) < 500, f"open_app with a {n}-character name is refused up front", t[:200])
+            check(dt < 2.0, f"...at once ({dt:.2f} s)", dt)
+        t, _, err = s.call("open_app", {"name": "b" * 260, "observe": "none"}, timeout=30)
+        check(err and "not an installed app" in t, "a name of exactly 260 characters is still looked at", t[:200])
+    finally:
+        s.close()
+
+
+def v34_apps():
+    section("v0.3.4 follow-up N5: a protected window's title does not mark an installed app as running")
+    s = server(EXE)
+    v = o = None
+    try:
+        def running_line():
+            t, _, err = s.call("list_apps", {"query": "Calculator"})
+            part = t.split("Installed apps matching", 1)[-1]
+            return [ln for ln in part.splitlines() if "Calculator" in ln and "running" in ln], t
+        base, t0 = running_line()
+        if base:
+            skip("N5: a Calculator is running on this machine already, so there is no baseline")
+            return
+        check("Calculator" in t0, "control: the query finds the installed Calculator", t0[-300:])
+        v = Dummy("keepassxc.exe", "DC Calculator Vault QZ", "VAULTTEXT", "plain", 620, 20)
+        got, t1 = running_line()
+        check(not got, "a password-manager window titled 'Calculator ...' does not make Calculator 'running'", t1[-300:])
+        o = Dummy("dcother.exe", "DC Calculator Ordinary QZ", "", "plain", 20, 270)
+        got, t2 = running_line()
+        check(bool(got), "...while an ordinary window with that title does (control)", t2[-300:])
+    finally:
+        s.close()
+        for d in (v, o):
+            if d:
+                d.close()
+
+
+def v34_cancel():
+    section("v0.3.4: a cancellation ends the wait for a busy target at once; the clipboard is back")
+    import clipguard
+    orig = clipguard.read_all()[0]
+    sentinel = "USER-CLIP-SENTINEL-V34C-" + str(int(time.time()))
+    os.environ["DC_SLOW_MS"] = "12000"
+    try:
+        d = Dummy("dcslow.exe", "DC Sec V34 SlowC", "", "slowpaste", 20, 20)
+        s = server(EXE)
+        try:
+            d.front()
+            s.call("focus_window", {"name": "#%d" % d.hwnd, "observe": "none"})
+            check(fg_is(d), "the slow target (busy for 12 s per Ctrl+V) is in front")
+            clip_put(sentinel)
+            rid = s.start_call("type_text", {"text": "first line\nsecond line", "observe": "none"})
+            time.sleep(2.5)  # past the 1 s wait for the field to change: now waiting for the busy target
+            t_cancel = time.time()
+            s.notify("notifications/cancelled", {"requestId": rid, "reason": "test"})
+            t, _, err = s.call("status", {}, timeout=60)
+            dt = time.time() - t_cancel
+            check(dt < 5.0, f"the cancelled typing ended at once and the next call was answered ({dt:.1f} s after the cancel; without the fix it waits for the target, about 9 s more)", dt)
+            check(clip_get() == sentinel, "the user's clipboard is back", str(clip_get())[:100])
+        finally:
+            s.close()
+            d.close()
+    finally:
+        os.environ.pop("DC_SLOW_MS", None)
+        clipguard.write_all(orig)
+
+
+def v34_idle(home):
+    section("v0.3.4: the user's stop ends the wait for a busy target at once; the clipboard is back and the result says so (debug build)")
+    import clipguard
+    orig = clipguard.read_all()[0]
+    sentinel = "USER-CLIP-SENTINEL-V34I-" + str(int(time.time()))
+    os.environ["DC_SLOW_MS"] = "12000"
+    p = instance(DBG)
+    d_ = os.path.dirname(p)
+    stopf, env = stop_file_env(d_)
+    try:
+        d = Dummy("dcslow.exe", "DC Sec V34 SlowI", "", "slowpaste", 20, 20)
+        home.front()
+        s = Server(p, env=env, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+        try:
+            s.call("list_apps", {})
+            d.front()
+            s.call("focus_window", {"name": "#%d" % d.hwnd, "observe": "none"})
+            check(fg_is(d), "the slow target (busy for 12 s per Ctrl+V) is in front")
+            clip_put(sentinel)
+            t0 = time.time()
+            rid = s.start_call("type_text", {"text": "first line\nsecond line", "observe": "none"})
+            time.sleep(2.0)
+            open(stopf, "w").close()  # the hook thread raises the stop within a second
+            m = s.wait(rid, 60)
+            dt = time.time() - t0
+            r = m.get("result", {})
+            t = "\n".join(c.get("text", "") for c in r.get("content", []) if c.get("type") == "text")
+            check(dt < 7.0, f"the typing ended soon after the stop ({dt:.1f} s in all; without the fix it waits for the target, 12 s and more)", dt)
+            check(bool(r.get("isError")) and "stopped" in t.lower(), "...and the result is the stop", t[:300])
+            check("clipboard" in t.lower() and "stop" in t.lower(), "...and says that the clipboard was put back while the target may still paste", t[:600])
+            check(clip_get() == sentinel, "the user's clipboard is back", str(clip_get())[:100])
+        finally:
+            s.close()
+            d.close()
+    finally:
+        os.environ.pop("DC_SLOW_MS", None)
+        clipguard.write_all(orig)
 
 
 def slow_target_paste(exe, label, lines, expect_title):
@@ -891,10 +1098,79 @@ def l_v033_masking_and_titles(home):
         a.front()
         t, _, err = s.call("run_actions", {"actions": [{"action": "wait", "seconds": 0.1}], "observe": "brief"})
         check("DC Sec L1 Unknown" not in t and "hidden: protected window" in t, "L2: 'Active window now' does not show it", t[:300])
+        # v0.3.4: matching skips the unidentifiable program's window (no oracle for its title), for focus_window, move_window and waits
+        o.front()
+        t, _, err = s.call("focus_window", {"name": "DC Sec L1 Unknown", "observe": "none"})
+        check(err and t.startswith("No open window with"), "v0.3.4: focus_window on an unknown program's title answers 'no matching window'", t[:200])
+        t, _, err = s.call("move_window", {"name": "DC Sec L1 Unknown", "monitor": 1, "observe": "none"})
+        check(err and t.startswith("No open window with"), "...move_window too", t[:200])
+        t, _, err = s.call("run_script", {"script": 'let hit = wait_for("DC Sec L1 Unknown", #{scope: "window", timeout: 2}); log("hit=" + hit); 1', "observe": "none"}, timeout=40)
+        check("hit=false" in t, "...and a wait does not confirm that its window exists", t[:200])
+        t, _, err = s.call("run_script", {"script": 'let hit = wait_for("DC Sec L1 Ordinary", #{scope: "window", timeout: 2}); log("hit=" + hit); 1', "observe": "none"}, timeout=40)
+        check("hit=true" in t, "...while a wait for the ordinary window finds it (control)", t[:200])
+        t, _, err = s.call("focus_window", {"name": "DC Sec L1 Ordinary", "observe": "none"})
+        check(not err, "...while an ordinary window is still found by its title (control)", t[:200])
     finally:
         s.close()
         a.close()
         o.close()
+
+
+def v34_unknown_child(home):
+    section("v0.3.4: a window of an unidentifiable program embedded as a child window is blacked out of window and monitor pictures (debug build)")
+    host = Dummy("dcother.exe", "DC Sec V34 Host", "HOSTMARKERTEXT", "plain", 20, 20)
+    child = Dummy("dcplain.exe", "DC Sec V34 Child", "CHILDMARK", "plain", 620, 20)
+    p = instance(DBG)
+    home.front()
+    s = Server(p, env={"DC_TEST_UNKNOWN_EXE_PID": str(child.pid), "DC_TEST_NO_HOST": "1"}, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+    try:
+        s.call("list_apps", {})
+        embed(child, host, 0, 60, 540, 100)
+        time.sleep(0.8)
+        host.front()
+        time.sleep(0.5)
+        s.call("focus_window", {"name": "#%d" % host.hwnd, "observe": "none"})
+        for label, kw in (("window screenshot", {"window": "#%d" % host.hwnd}), ("monitor screenshot", {"monitor": 1})):
+            t, _, err = s.call("find_text", dict(kw, text="HOSTMARKERTEXT"))
+            t2, _, err2 = s.call("find_text", dict(kw, text="CHILDMARK"))
+            if "match(es)" not in t:
+                skip(f"v0.3.4 {label}: OCR did not read the host's own text, so there is no control for the masking check")
+                continue
+            check("No on-screen text matches" in t2, f"the embedded unidentifiable program's window is blacked out of the {label} (the host's own text is read)", t2[:300])
+    finally:
+        s.close()
+        host.close()
+        child.close()
+
+
+def v34_cut(home):
+    section("v0.3.4 follow-up N6: a child-window walk cut short by its limit blacks out the whole window (debug build)")
+    host = Dummy("dcother.exe", "DC Sec V34 CutHost", "HOSTMARKERTEXT", "plain", 20, 20)
+    home.front()
+    try:
+        for label, env in (("control: the default limit", {}), ("a limit of one child", {"DC_TEST_CHILD_LIMIT": "1"})):
+            e = {"DC_TEST_NO_HOST": "1"}
+            e.update(env)
+            home.front()  # the stand-in for the AI app is in front when the task starts (it becomes the fallback host)
+            s = Server(instance(DBG), env=e, stderr=subprocess.DEVNULL, creationflags=0x08000000)
+            try:
+                s.call("list_apps", {})
+                host.front()
+                time.sleep(0.5)
+                s.call("focus_window", {"name": "#%d" % host.hwnd, "observe": "none"})
+                for what, kw in (("window screenshot", {"window": "#%d" % host.hwnd}), ("monitor screenshot", {"monitor": 1})):
+                    t, _, err = s.call("find_text", dict(kw, text="HOSTMARKERTEXT"))
+                    read = "match(es)" in t
+                    if env:
+                        check(not read and "No on-screen text matches" in t, f"{label}: the whole window is blacked out of the {what}", t[:200])
+                    elif not read and what.startswith("monitor"):
+                        skip("N6 control: OCR did not read the host's text in the monitor picture")
+                    else:
+                        check(read, f"{label}: the host's text is read in the {what}", t[:200])
+            finally:
+                s.close()
+    finally:
+        host.close()
 
 
 def l2_titles():
@@ -924,8 +1200,18 @@ def l2_titles():
         results.append(("list_elements", s.call("list_elements", {})))
         t, _, err = s.call("run_script", {"script": 'log(active_window()); 1', "observe": "none"}, timeout=40)
         results.append(("script active_window()", (t, 0, err)))
+        # v0.3.4: a name that only a protected window matches is answered exactly like a name nothing matches
+        echo = 'No open window with "%s" in its title.' % secret
+        for name, (t, _, err) in results[:3]:
+            check(err and t.strip().startswith("No open window with") and t.strip().replace(secret, "Q") == 'No open window with "Q" in its title.', f"v0.3.4: {name} on the protected title answers as 'no matching window'", t[:300])
+        ref, _, rerr = s.call("focus_window", {"name": "zzq-no-such-window-xyz", "observe": "none"})
+        check(rerr and ref.strip().replace("zzq-no-such-window-xyz", "Q") == 'No open window with "Q" in its title.', "...the same text as for a name nothing matches", ref[:200])
+        t, _, err = s.call("focus_window", {"name": "#%d" % v.hwnd, "observe": "none"})
+        check(err and t.startswith("No open window with") and "keepassxc" not in t.lower(), "...also when the window is named by its handle", t[:200])
+        t, _, err = s.call("focus_window", {"name": "keepassxc", "observe": "none"})
+        check(err and t.startswith("No open window with") and "refus" not in t.lower(), "...and when it is named by its program", t[:200])
         for name, (t, _, err) in results:
-            check(secret not in t, f"L2: {name} does not quote the title of a password-manager window", t[:300])
+            check(secret not in t.replace(echo, ""), f"L2: {name} does not quote the title of a password-manager window", t[:300])
         check(any("hidden: protected window" in t for _, (t, _, _) in results), "...where a title would have been it says it is hidden", str([r[1][0][:80] for r in results]))
     finally:
         s.close()
@@ -959,42 +1245,64 @@ def l3_paths():
         s.close()
 
 
+def embed(child, host, x, y, w, h):
+    """Make the window of `child` (another process) a child window of `host`, as an embedded or hosted window is."""
+    GWL_STYLE, WS_CHILD, WS_POPUP, WS_CAPTION = -16, 0x40000000, 0x80000000, 0x00C00000
+    u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    u.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
+    u.MoveWindow.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.BOOL]
+    st = u.GetWindowLongW(child.hwnd, GWL_STYLE)
+    u.SetWindowLongW(child.hwnd, GWL_STYLE, (st & ~WS_POPUP & ~WS_CAPTION) | WS_CHILD)
+    u.SetParent(child.hwnd, host.hwnd)
+    u.MoveWindow(child.hwnd, x, y, w, h, True)
+
+
 def l4_element_process(home):
-    section("v0.3.3 L4: an element belonging to a protected program inside an ordinary window is refused")
-    host = Dummy("dcother.exe", "DC Sec L4 Host", "", "plain", 20, 20)
-    vault = Dummy("keepassxc.exe", "DC Sec L4 Vault", "", "plain", 620, 20, button="VaultSecretButton")
+    section("v0.3.3 L4 + v0.3.4: an element or window of a protected program inside an ordinary window is refused, not listed, not read, not shown")
+    host = Dummy("dcother.exe", "DC Sec L4 Host", "HOSTMARKERTEXT", "plain", 20, 20)
+    vault = Dummy("keepassxc.exe", "DC Sec L4 Vault", "VLTMARK", "plain", 620, 20, button="VaultSecretButton")
+    ordinary = Dummy("dcplain.exe", "DC Sec L4 Ordinary", "ORDMARK", "plain", 620, 270, button="OrdinaryEmbeddedButton")
     s = server(EXE)
     try:
-        # the vault's window becomes a child window of the ordinary host window (same desktop, other process)
-        GWL_STYLE, WS_CHILD, WS_POPUP, WS_CAPTION = -16, 0x40000000, 0x80000000, 0x00C00000
-        u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-        u.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-        u.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
-        u.MoveWindow.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.BOOL]
-        st = u.GetWindowLongW(vault.hwnd, GWL_STYLE)
-        u.SetWindowLongW(vault.hwnd, GWL_STYLE, (st & ~WS_POPUP & ~WS_CAPTION) | WS_CHILD)
-        u.SetParent(vault.hwnd, host.hwnd)
-        u.MoveWindow(vault.hwnd, 0, 0, 500, 160, True)
+        # the vault's and an ordinary program's windows become child windows of the ordinary host window (same desktop, other processes)
+        embed(vault, host, 0, 60, 270, 100)
+        embed(ordinary, host, 270, 60, 270, 100)
         time.sleep(0.8)
         host.front()
         s.call("focus_window", {"name": "#%d" % host.hwnd, "observe": "none"})
         s.call("screenshot", {"window": "#%d" % host.hwnd})
         t, _, err = s.call("list_elements", {})
-        embedded = "VaultSecretButton" in t
-        if not embedded:
-            skip("L4: UI Automation does not list the embedded window's controls here; nothing to check at runtime")
+        if "OrdinaryEmbeddedButton" not in t:
+            skip("L4: UI Automation does not list the embedded windows' controls here; nothing to check at runtime")
             return
+        check(True, "control: UI Automation lists the controls of an embedded ordinary program's window")
+        check("VaultSecretButton" not in t, "v0.3.4: list_elements skips the subtree of the embedded password-manager window", t[:400])
         title_before = testutil.title_of(vault.hwnd)
-        t, _, err = s.call("element_action", {"target": "VaultSecretButton", "action": "invoke", "observe": "none"})
-        check(err and "keepassxc.exe" in t and "refusing" in t, "element_action(invoke) on a control of the embedded password-manager window is refused", t[:300])
+        for what, args in (("element_action(invoke)", ("element_action", {"target": "VaultSecretButton", "action": "invoke", "observe": "none"})),
+                           ("read_text(name)", ("read_text", {"target": "VaultSecretButton"})),
+                           ("set_value", ("set_value", {"target": "VaultSecretButton", "value": "x", "observe": "none"}))):
+            t, _, err = s.call(*args)
+            check(err and ("refus" in t.lower() or "no visible element" in t.lower()) and "VaultSecret" not in t.replace('"VaultSecretButton"', ""), f"{what} on a control of the embedded password-manager window is refused", t[:300])
         check(testutil.title_of(vault.hwnd) == title_before, "...and the button was not invoked", testutil.title_of(vault.hwnd))
-        t, _, err = s.call("read_text", {"target": "VaultSecretButton"})
-        check(err and "keepassxc.exe" in t, "read_text(name) on it is refused", t[:300])
-        t, _, err = s.call("set_value", {"target": "VaultSecretButton", "value": "x", "observe": "none"})
-        check(err and "keepassxc.exe" in t, "set_value on it is refused", t[:300])
+        t, _, err = s.call("wait_for", {"name": "VaultSecretButton", "scope": "element", "timeout": 2})
+        check(err, "a wait does not find a control inside the embedded password-manager window", t[:200])
+        # pictures: the vault's rectangle is blacked out of a window screenshot and of a monitor screenshot (OCR sees the rest)
+        host.front()
+        time.sleep(0.5)
+        for label, kw in (("window screenshot", {"window": "#%d" % host.hwnd}), ("monitor screenshot", {"monitor": 1})):
+            t, _, err = s.call("find_text", dict(kw, text="ORDMARK"))
+            ok_ord = "match(es)" in t
+            t2, _, err2 = s.call("find_text", dict(kw, text="VLTMARK"))
+            if label.startswith("monitor") and not ok_ord:
+                skip("L4 monitor picture: the embedded ordinary window's text was not readable by OCR here, so the masking check has no control")
+                continue
+            check(ok_ord, f"control: OCR reads the embedded ordinary program's text in the {label}", t[:200])
+            check("No on-screen text matches" in t2 and "VLTMARK" not in t2.replace('"VLTMARK"', ""), f"v0.3.4: the embedded password-manager window is blacked out of the {label}", t2[:300])
     finally:
         s.close()
         vault.close()
+        ordinary.close()
         host.close()
 
 
@@ -1002,11 +1310,21 @@ def l4_element_process(home):
 def debug_sections():
     home = Dummy("dchome.exe", "DC Sec Home", "", "plain", 620, 270)
     try:
-        for keys, fn in ((("n2", "h4"), n2), (("n3",), n3), (("m3",), m3), (("m6",), m6), (("l2h",), l2), (("l5",), l5), (("l1l2d",), l_v033_masking_and_titles)):
+        for keys, fn in ((("n2", "h4"), n2), (("n2b",), n2b), (("v34_idle",), v34_idle), (("n3",), n3), (("m3",), m3), (("m6",), m6), (("l2h",), l2), (("l5",), l5), (("l1l2d",), l_v033_masking_and_titles), (("v34_unknown",), v34_unknown_child), (("v34_cut",), v34_cut)):
             if any(wanted(k) for k in keys):
                 fn(home)
     finally:
         home.close()
+
+
+def phys(path, hwnd=None, extra=""):
+    """Ask the debug build for a simulated physical key or click; `hwnd` is the window that counts as the foreground one for
+    it (None: the real foreground window); `extra` is more of the trigger text: "vk=<n>" (the key), "click=<x>,<y>" (a click
+    there), "mods=1" (Alt or Win held). Written in one step so that the hook never reads a half-written file."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write((str(hwnd) if hwnd else "") + " " + extra)
+    os.replace(tmp, path)
 
 
 def stop_file_env(d):

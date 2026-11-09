@@ -361,6 +361,104 @@ pub fn require_view() -> Result<(), String> {
     Ok(())
 }
 
+/// Most child windows looked at under one top-level window, and in all for one picture: a bound, so that a window with
+/// thousands of children cannot make a screenshot slow.
+const CHILD_WALK_PER_WINDOW: usize = 400;
+const CHILD_WALK_TOTAL: usize = 3000;
+
+/// Screen rectangles of the visible child windows of `top` whose process is protected (the lock screen, a security or
+/// password-manager app) or can't be identified, when that process is not the top-level window's own: a window of
+/// another program embedded in an ordinary one (`SetParent`, a hosted control). `budget` is what is left of the total
+/// number of children that may be looked at; Store-app frames are judged through their CoreWindow elsewhere and left alone.
+///
+/// The bool is true when the walk was cut short by the limit: what is left unseen is unknown, so the caller must fail closed
+/// and black out the whole top-level window.
+fn embedded_protected_rects(top: HWND, top_pid: u32, by_pid: &mut std::collections::HashMap<u32, String>, budget: &mut usize) -> (Vec<win::Rect>, bool) {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetWindow, IsWindowVisible, GW_CHILD};
+    struct Walk<'a> {
+        top_pid: u32,
+        me: u32,
+        by_pid: &'a mut std::collections::HashMap<u32, String>,
+        left: usize,
+        cut: bool,
+        out: Vec<win::Rect>,
+    }
+    unsafe extern "system" fn cb(h: HWND, lp: LPARAM) -> BOOL {
+        let w = &mut *(lp.0 as *mut Walk);
+        if w.left == 0 {
+            w.cut = true; // another child is there that the limit does not allow to look at
+            return BOOL(0);
+        }
+        w.left -= 1;
+        if !IsWindowVisible(h).as_bool() {
+            return BOOL(1);
+        }
+        let pid = win::pid_of(h);
+        if pid == 0 || pid == w.top_pid || pid == w.me {
+            return BOOL(1);
+        }
+        let exe = w.by_pid.entry(pid).or_insert_with(|| win::exe_name(pid)).clone();
+        if exe != win::FRAME_HOST && (exe.is_empty() || is_protected_exe(&exe)) {
+            let r = win::window_rect(h);
+            if r.width > 0 && r.height > 0 {
+                w.out.push(r);
+            }
+        }
+        BOOL(1)
+    }
+    let take = child_walk_limit().min(*budget);
+    if take == 0 {
+        // the total is used up: a window that has children at all cannot be looked at
+        let has_children = unsafe { GetWindow(top, GW_CHILD) }.map(|c| !c.0.is_null()).unwrap_or(false);
+        return (Vec::new(), has_children);
+    }
+    let mut walk = Walk { top_pid, me: std::process::id(), by_pid, left: take, cut: false, out: Vec::new() };
+    unsafe {
+        let _ = EnumChildWindows(Some(top), Some(cb), LPARAM(&mut walk as *mut _ as isize));
+    }
+    *budget -= take - walk.left;
+    (walk.out, walk.cut)
+}
+
+/// Children looked at per top-level window (a debug build can lower it with `DC_TEST_CHILD_LIMIT`).
+fn child_walk_limit() -> usize {
+    #[cfg(debug_assertions)]
+    if let Some(n) = std::env::var("DC_TEST_CHILD_LIMIT").ok().and_then(|v| v.parse::<usize>().ok()) {
+        return n;
+    }
+    CHILD_WALK_PER_WINDOW
+}
+
+/// Black out, in the picture of one window (`origin` is the screen rectangle the picture shows), the windows of protected
+/// or unidentifiable programs embedded in it as child windows.
+pub fn mask_embedded(img: &mut image::RgbaImage, hwnd: HWND, origin: win::Rect) {
+    let mut by_pid: std::collections::HashMap<u32, String> = Default::default();
+    let mut budget = CHILD_WALK_TOTAL;
+    let (rects, cut) = embedded_protected_rects(hwnd, win::pid_of(hwnd), &mut by_pid, &mut budget);
+    if cut {
+        // fail closed: part of the window could not be checked, so none of it is shown
+        black_out(img, origin, win::Rect { left: origin.left, top: origin.top, width: img.width() as i32, height: img.height() as i32 });
+        return;
+    }
+    for r in rects {
+        black_out(img, origin, r);
+    }
+}
+
+fn black_out(img: &mut image::RgbaImage, origin: win::Rect, r: win::Rect) {
+    let x0 = (r.left - origin.left).clamp(0, img.width() as i32) as u32;
+    let y0 = (r.top - origin.top).clamp(0, img.height() as i32) as u32;
+    let x1 = (r.left + r.width - origin.left).clamp(0, img.width() as i32) as u32;
+    let y1 = (r.top + r.height - origin.top).clamp(0, img.height() as i32) as u32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            img.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+        }
+    }
+}
+
 /// Black out, in a picture of a monitor (`monitor` is its screen rectangle), the windows that must
 /// never be read: security and password-manager apps, the lock screen and, when asked, the AI app's own.
 /// The stacking order is respected: an ordinary window in front of a hidden one stays readable, so
@@ -372,6 +470,7 @@ pub fn mask_protected(img: &mut image::RgbaImage, monitor: win::Rect, include_ho
         protected: bool,
     }
     let mut by_pid: std::collections::HashMap<u32, String> = Default::default();
+    let mut child_budget = CHILD_WALK_TOTAL;
     let me = std::process::id();
     let mut list: Vec<W> = Vec::new(); // front to back
     for h in win::windows_z() {
@@ -398,6 +497,23 @@ pub fn mask_protected(img: &mut image::RgbaImage, monitor: win::Rect, include_ho
         if protected {
             list.push(W { r, protected: true });
             continue;
+        }
+        // windows of protected or unidentifiable programs embedded in this one as child windows: blacked out too. They sit
+        // in front of this window's own pixels, so they come before its entry in the front-to-back list.
+        if pid != me {
+            let (kids, cut) = embedded_protected_rects(h, pid, &mut by_pid, &mut child_budget);
+            if cut {
+                // the walk hit its limit: what is left unseen is unknown, so the whole window is blacked out (fail closed)
+                list.push(W { r, protected: true });
+                continue;
+            }
+            for k in kids {
+                let (l, t) = (k.left.max(r.left), k.top.max(r.top));
+                let (rr, bb) = ((k.left + k.width).min(r.left + r.width), (k.top + k.height).min(r.top + r.height));
+                if rr > l && bb > t {
+                    list.push(W { r: win::Rect { left: l, top: t, width: rr - l, height: bb - t }, protected: true });
+                }
+            }
         }
         if covers {
             list.push(W { r, protected: false });

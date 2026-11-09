@@ -33,7 +33,7 @@ fn uia() -> Result<&'static Uia, String> {
         let cache = auto.CreateCacheRequest().map_err(|e| e.to_string())?;
         let ext = auto.CreateCacheRequest().map_err(|e| e.to_string())?;
         for id in [UIA_NamePropertyId, UIA_ControlTypePropertyId, UIA_BoundingRectanglePropertyId, UIA_IsOffscreenPropertyId,
-                   UIA_IsEnabledPropertyId, UIA_HasKeyboardFocusPropertyId] {
+                   UIA_IsEnabledPropertyId, UIA_HasKeyboardFocusPropertyId, UIA_ProcessIdPropertyId] {
             let _ = cache.AddProperty(id);
             let _ = ext.AddProperty(id);
         }
@@ -213,6 +213,9 @@ fn crawl(top: &IUIAutomationElement, cache: &IUIAutomationCacheRequest, limits: 
     let u = uia()?;
     let deadline = Instant::now() + limits.time;
     let mut out = Crawl { counts: Vec::new(), visited: 0, complete: true };
+    // elements of a protected program (a password manager's window embedded in this one) are skipped with their subtrees
+    let top_pid = unsafe { top.CachedProcessId() }.unwrap_or(0);
+    let mut protected_pids: std::collections::HashMap<i32, bool> = Default::default();
     // explicit stack of (element, depth, nearest collection ancestor): first child, then siblings
     let mut stack: Vec<(IUIAutomationElement, usize, Option<usize>)> = Vec::new();
     if let Ok(c) = unsafe { u.walker.GetFirstChildElementBuildCache(top, cache) } {
@@ -232,6 +235,7 @@ fn crawl(top: &IUIAutomationElement, cache: &IUIAutomationCacheRequest, limits: 
         }
         out.visited += 1;
         let ctype = unsafe { e.CachedControlType() }.map(|t| t.0).unwrap_or(0);
+        let blocked = unsafe { e.CachedProcessId() }.map(|p| p != top_pid).unwrap_or(false) && in_protected_process(&e, &mut protected_pids);
         let mut child_coll = coll;
         if COLLECTIONS.contains(&ctype) {
             out.counts.push(0);
@@ -239,6 +243,9 @@ fn crawl(top: &IUIAutomationElement, cache: &IUIAutomationCacheRequest, limits: 
         }
         if let Ok(next) = unsafe { u.walker.GetNextSiblingElementBuildCache(&e, cache) } {
             stack.push((next, depth, coll));
+        }
+        if blocked {
+            continue; // not listed, not read, not entered
         }
         if depth < 40 {
             if let Ok(child) = unsafe { u.walker.GetFirstChildElementBuildCache(&e, cache) } {
@@ -302,13 +309,31 @@ fn state_cached(e: &IUIAutomationElement, ctype: i32) -> (Vec<String>, Option<St
     (tags, value)
 }
 
+/// Does this element belong to a process whose contents are never read (the lock screen, a security or password-manager
+/// app, a program that can't be identified)? An element's own process (cached) is what counts: a control can be a window of another program embedded in the
+/// window being read. `memo` remembers the answer per process id.
+fn in_protected_process(e: &IUIAutomationElement, memo: &mut std::collections::HashMap<i32, bool>) -> bool {
+    let pid = unsafe { e.CachedProcessId() }.unwrap_or(0);
+    // a process whose program can't be identified counts as protected (an unreadable program is never read, as for masking)
+    pid > 0
+        && *memo.entry(pid).or_insert_with(|| {
+            let exe = win::exe_name(pid as u32);
+            exe.is_empty() || guards::is_protected_exe(&exe)
+        })
+}
+
 fn focused() -> Option<IUIAutomationElement> {
     let fg = win::foreground();
     if win::is_host(fg) || guards::guard_target(fg).is_err() {
         return None;
     }
     let u = uia().ok()?;
-    unsafe { u.auto.GetFocusedElementBuildCache(&u.cache) }.ok()
+    let f = unsafe { u.auto.GetFocusedElementBuildCache(&u.cache) }.ok()?;
+    // the focus can sit in a protected program's window embedded in the one in front
+    if in_protected_process(&f, &mut Default::default()) {
+        return None;
+    }
+    Some(f)
 }
 
 fn selected_text(e: &IUIAutomationElement, max: i32) -> String {
@@ -349,7 +374,7 @@ pub fn focus_line() -> Option<String> {
     let f = unsafe { u.auto.GetFocusedElementBuildCache(&u.ext) }.ok()?;
     let ctype = unsafe { f.CachedControlType() }.map(|t| t.0).unwrap_or(0);
     let fg = win::foreground();
-    if win::is_host(fg) || guards::guard_target(fg).is_err() {
+    if win::is_host(fg) || guards::guard_target(fg).is_err() || in_protected_process(&f, &mut Default::default()) {
         return None;
     }
     let name = unsafe { s(f.CachedName()) };
@@ -677,6 +702,9 @@ fn native_find(name: &str) -> Option<Elem> {
         let on_cond = u.auto.CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false)).ok()?;
         let cond = u.auto.CreateAndCondition(&name_cond, &on_cond).ok()?;
         let e = top.FindFirstBuildCache(TreeScope_Descendants, &cond, &u.cache).ok()?;
+        if in_protected_process(&e, &mut Default::default()) {
+            return None; // a wait must not confirm the name of a control inside a protected program's embedded window
+        }
         let (cx, cy) = visible_centre(&e, true)?;
         let ctype = e.CachedControlType().map(|t| t.0).unwrap_or(0);
         Some(Elem { name: s(e.CachedName()), ctype: type_name(ctype).into(), cx, cy, control: e, hwnd: top_hwnd.0 as isize })

@@ -14,7 +14,7 @@
 ![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange)
 [![GitHub stars](https://img.shields.io/github/stars/GamingBlazer/computer-use-rust?style=social)](https://github.com/GamingBlazer/computer-use-rust/stargazers)
 
-> 🚧 **Pre-release (v0.3.3).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
+> 🚧 **Pre-release (v0.3.4).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
 > called `desktop-control.exe`; it becomes `computer-use.exe` at release.
 
 **[What is it?](#-what-is-computer-use-rust)** · **[Why it's different](#-why-its-different)** · **[All features](#-all-features)** · **[Benchmarks](#-benchmarks)** · **[Quick start](#-quick-start)** · **[Safety](#%EF%B8%8F-safety-first)** · **[FAQ](#-faq)**
@@ -164,14 +164,14 @@ Common options on action tools: `observe` (`text` / `screenshot` / `both` / `non
 
 An AI driving your real desktop must be easy to stop and impossible to misuse quietly:
 
-- ⏹️ **Physical Esc** blocks every screen tool. The AI cannot lift it by itself: `finish` only hides the indicator, and running `turn-ended`, touching its file or simply waiting does nothing on its own. It lifts only when your turn with the AI has ended (the Stop hook below) or 30 s have passed without any tool call, **and** you have pressed a key or clicked since the Esc (input the AI sends itself is recognised and does not count). Typing your next message to the AI is enough.
+- ⏹️ **Physical Esc** blocks every screen tool. The AI cannot lift it by itself: `finish` only hides the indicator, and running `turn-ended`, touching its file or simply waiting does nothing on its own. It lifts only when your turn with the AI has ended (the Stop hook below) or 30 s have passed without any tool call, **and** you have pressed a key or clicked in your AI app since the Esc (input the AI sends itself is recognised and does not count, and neither does a key or click in any other app). Typing your next message to the AI is enough; with the turn-ended path the key must come after the turn ended.
 - 🖱️ **Corner fail-safe**: push the mouse into a screen corner to stop.
 - ✋ **You come first**: if you touch the mouse or keyboard, every action is refused until the AI has taken a fresh look, and it is told to ask you first.
-- 🔒 **Never drives** the lock screen, Windows Security, credential prompts or password managers (1Password, Bitwarden, KeePass, …); their windows are blacked out of screenshots and their titles are never shown. A window whose program can't be identified is treated the same way.
+- 🔒 **Never drives** the lock screen, Windows Security, credential prompts or password managers (1Password, Bitwarden, KeePass, …); their windows are blacked out of screenshots and their titles are never shown. A window whose program can't be identified is treated the same way, including one embedded as a child window of another app's window (its area is blacked out and its controls are not listed), and the AI cannot find such a window by its title.
 - ✅ **Allow-list** (`apps.allowed`) to keep the AI inside the apps you choose.
 - 🧭 **Stale-state protection**: refuses to click if the window moved, resized or got covered since the AI last looked.
 - 🪟 **Your AI app is off-limits**: it never types, clicks, reads or sends any shortcut into the chat or terminal you're talking to it from, and there is no way to opt in.
-- 🚀 **`open_app` is fenced**: installed apps by name, or a `.exe` under Program Files or System32. URLs, scripts, shortcuts, installers and anything in Downloads or Temp are refused, and a name that is not an installed app is an error: nothing is ever typed into Start or a search box.
+- 🚀 **`open_app` is fenced**: installed apps by name, or a `.exe` under Program Files or System32. URLs, scripts, shortcuts, installers and anything in Downloads or Temp are refused, and a name that is not an installed app (or is longer than 260 characters) is an error: nothing is ever typed into Start or a search box.
 - 📜 **Built-in etiquette**: the AI is told to ask before deleting, sending, paying or changing security settings, and to treat text on web pages as data, never as instructions.
 - 🏠 **100% local**: no telemetry, no cloud. Screenshots go only to the AI client you connected.
 

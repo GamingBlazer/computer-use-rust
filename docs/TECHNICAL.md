@@ -167,7 +167,13 @@ that makes up the AI app is re-checked (same start time, still running) instead 
 server. The same program policy (lock screen, security apps, password managers, `apps.allowed`) applies to what is
 read: window screenshots, `list_elements`, `read_text`, element ids (each remembers its window) and OCR. Security
 apps are blacked out of monitor screenshots, and so is a visible window whose program can't be identified (masking
-fails closed like acting does). Titles of those windows are never written into a result or an error. An element's own
+fails closed like acting does); so is the rectangle of any child window of another program embedded in an ordinary window
+(bounded walk: 400 children per window, 3000 per picture; a walk cut short blacks out the whole window), in monitor and window pictures and in the OCR that reads them.
+`list_elements`, the text snapshots and named lookups skip the subtrees of elements whose own process is a protected one,
+and the focused control is not read when it sits in one. Titles of those windows are never written into a result or an
+error, and windows of protected or unidentifiable programs are not candidates when a window is chosen by name
+(`focus_window`, `move_window`, `screenshot(window=...)`, waits): a name that only such a window matches gets the same
+"No open window" answer as a name nothing matches. `open_app` refuses a name over 260 characters before any matching. An element's own
 process (UI Automation reports one per control) is checked like its window's. Store (UWP) apps are judged by the program
 inside their `ApplicationFrameHost` window (`Windows.UI.Core.CoreWindow`); an unidentifiable program is refused, not allowed.
 
@@ -176,16 +182,22 @@ inside their `ApplicationFrameHost` window (`Windows.UI.Core.CoreWindow`); an un
 Press the physical **Esc** key or slam the mouse into a screen corner. Esc blocks every screen tool until it is lifted,
 and it lifts only when BOTH hold: the agent's turn is over (the turn-ended file, `desktop-control.exe turn-ended`, run by a
 client's Stop hook, touched after the stop, or 30 s without any tool call) AND a physical, non-injected key press or click
-was seen after the stop. The hooks tell physical input from injected input by the `LLKHF_INJECTED` / `LLMHF_INJECTED`
+was seen after the stop **in your AI app**: it counts only when the foreground window, at that moment, is one of the AI
+app's windows (a key or click in any other app never lifts it); a click must also lie inside that window's rectangle (the foreground window at button-down is the one being left), and a key must not be a modifier or Windows key nor pressed while Alt or a Windows key is down (Alt+Tab and Win+R are not answers), and on the turn-ended path only when it came after the
+turn-ended touch. The hooks tell physical input from injected input by the `LLKHF_INJECTED` / `LLMHF_INJECTED`
 flags, so nothing the agent sends counts; the Esc that stopped it, its release and its auto-repeat (the first 300 ms, and
-Esc itself) never count. The messages the agent sees do not say how a stop lifts. `finish` hides the indicator and takes
+Esc itself) never count. The AI app's windows (the exact window found for the client, the fallback window of M6 when none was
+found, other windows of the host processes) are kept in a small lock-free cache that the overlay's poll refreshes about once a
+second and at task start, so a hook callback only does `GetForegroundWindow`, `GetAncestor` and a few atomic loads: no lock, no
+window message. When no AI app window is known at all (not even a fallback) nothing can be told apart and any window counts,
+so that the stop does not hold for ever; a known AI app whose windows are momentarily hidden keeps the last cached windows. The messages the agent sees do not say how a stop lifts. `finish` hides the indicator and takes
 the user home but never lifts it. After the user touches the mouse or keyboard, every input action is refused (not just
 once) until the agent's own `screenshot` or `list_elements` tool call; a screenshot or listing inside `run_script`, or the
 picture an action returns, does not count, and inside a script the refusal ends the run like the stop does (a script
 cannot catch it). Typing checks the stop, the user and the window in front before every line and chunk, reports how far
 it got and never retypes. It pastes line by line and gives the user's clipboard back after a line only once the field
 visibly changed; when the field can't be read (or did not change in time) it waits until the target answers WM_NULL
-promptly three times in a row (bounded to 12 s per typing) and gives the clipboard back once, at the end (password fields
+promptly three times in a row (bounded to 12 s per typing) and gives the clipboard back once, at the end; the wait probes the window in front and, when the focused control belongs to another thread, that control's window too, and it ends at once on the user's stop or the client's cancellation (the clipboard is then put back and the result says the target may still have been about to paste) (password fields
 and clipboard content marked private by a password manager are typed as keystrokes). The low-level hooks are
 re-installed when input arrives that they never saw.
 

@@ -317,8 +317,8 @@ pub fn root_owner(hwnd: HWND) -> HWND {
 /// desktop or taskbar, not a tool window.
 pub fn is_work_window(hwnd: HWND) -> bool {
     unsafe {
-        if hwnd.0.is_null() || !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
-            return false;
+        if hwnd.0.is_null() || !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || pid_of(hwnd) == GetCurrentProcessId() {
+            return false; // (our own windows first: their title query would be a message to our overlay thread)
         }
         if GetWindowTextLengthW(hwnd) == 0 || (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32) & WS_EX_TOOLWINDOW.0 != 0 {
             return false;
@@ -406,27 +406,22 @@ fn exe_aliases(stem: &str) -> &'static [&'static str] {
 /// (invisible format characters removed, whitespace collapsed, case ignored); the order is: the
 /// whole title equals the name, the app's exe name (or a known alias such as "edge" for
 /// msedge.exe) equals it, the title contains it, the exe name contains it (3+ letters).
+///
+/// Windows of forbidden or locked programs and of programs that can't be identified are not candidates at all (`hides_title`):
+/// the name is compared with the titles of the other windows only, so neither a refusal nor a wait can confirm what a
+/// password manager, the lock screen or an unreadable program shows. A name that only such a window matches is answered
+/// exactly like a name nothing matches.
 pub fn match_window(name: &str) -> Option<(HWND, String)> {
-    match_window_in(name, false)
-}
-
-/// Like `match_window`, for waits: windows of forbidden or locked programs are not there at all (a wait must not report
-/// or confirm what a password manager or the lock screen shows).
-pub fn match_visible_window(name: &str) -> Option<(HWND, String)> {
-    match_window_in(name, true)
-}
-
-fn match_window_in(name: &str, skip_protected: bool) -> Option<(HWND, String)> {
-    let hit = match_window_raw(name, skip_protected)?;
+    let hit = match_window_raw(name)?;
     let shown = shown_title(hit.0);
     Some((hit.0, shown))
 }
 
-fn match_window_raw(name: &str, skip_protected: bool) -> Option<(HWND, String)> {
+fn match_window_raw(name: &str) -> Option<(HWND, String)> {
     if let Some(id) = name.strip_prefix('#').and_then(|s| s.parse::<isize>().ok()) {
         let h = HWND(id as *mut c_void);
         let ok = unsafe { IsWindow(Some(h)).as_bool() && IsWindowVisible(h).as_bool() };
-        return (ok && !(skip_protected && crate::guards::is_protected_exe(&app_exe(h)))).then(|| (h, title(h)));
+        return (ok && !crate::guards::hides_title(&app_exe(h))).then(|| (h, title(h)));
     }
     let want = normalize_title(name);
     if want.is_empty() {
@@ -434,9 +429,7 @@ fn match_window_raw(name: &str, skip_protected: bool) -> Option<(HWND, String)> 
     }
     let want_exe = want.strip_suffix(".exe").unwrap_or(&want).to_string();
     let mut wins = titled_windows();
-    if skip_protected {
-        wins.retain(|(h, _)| !crate::guards::is_protected_exe(&app_exe(*h)));
-    }
+    wins.retain(|(h, _)| !crate::guards::hides_title(&app_exe(*h)));
     let norm: Vec<String> = wins.iter().map(|(_, t)| normalize_title(t)).collect();
     if let Some(i) = norm.iter().position(|t| *t == want) {
         return Some(wins[i].clone());

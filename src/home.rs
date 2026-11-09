@@ -66,6 +66,11 @@ fn lock() -> std::sync::MutexGuard<'static, State> {
 
 /// A normal app window: visible, titled, no owner, not a tool window, not the shell.
 fn is_candidate(h: HWND) -> bool {
+    // never our own windows (the overlay): querying their title sends a message to the overlay thread, which may be waiting
+    // for a lock the caller holds
+    if win::pid_of(h) == std::process::id() {
+        return false;
+    }
     unsafe {
         IsWindowVisible(h).as_bool()
             && GetWindowTextLengthW(h) > 0
@@ -328,6 +333,33 @@ pub fn resolved_window(fg: Option<HWND>) -> Option<HWND> {
         return alive(&lock());
     }
     None
+}
+
+/// Publish the AI app's windows (root windows: the exact ones, the layer-3 fallback, and the visible windows of the host
+/// processes) to the lock-free cache the keyboard and mouse hooks read, so that a hook callback can tell whether the window
+/// in front is the AI app's without taking a lock. Called outside the hooks (task start, the overlay's 100 ms poll).
+pub fn refresh_host_cache() {
+    let mut list: Vec<isize> = Vec::new();
+    {
+        let st = lock();
+        list.extend(st.exact.iter().copied());
+        if let Some(f) = st.fallback {
+            list.push(f);
+        }
+    }
+    for h in win::windows_z() {
+        if list.len() >= 12 {
+            break;
+        }
+        if win::pid_of(h) != std::process::id() && is_candidate(h) && is_host(h) {
+            list.push(win::root_owner(h).0 as isize);
+        }
+    }
+    list.sort_unstable();
+    list.dedup();
+    // nothing known at all: no AI app identified and no fallback window (the only case where the hooks fail open)
+    let nothing_known = unresolved() && lock().fallback.is_none();
+    crate::hooks::set_host_windows(&list, nothing_known);
 }
 
 /// Layer 3: remember the foreground window at the start of a task as the place to return to.

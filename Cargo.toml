@@ -1,6 +1,6 @@
 [package]
 name = "desktop-control"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 description = "Computer Use (Rust): a fast, safe MCP server that lets any AI agent see and operate every app on Windows"
 license = "Apache-2.0"

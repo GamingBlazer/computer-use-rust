@@ -247,7 +247,9 @@ fn capture_window_view(hwnd: windows::Win32::Foundation::HWND) -> Result<Shot, S
     }
     let outer = win::window_rect(hwnd);
     let frame = win::frame_rect(hwnd);
-    let img = capture::capture_window(hwnd, outer, frame)?;
+    let mut img = capture::capture_window(hwnd, outer, frame)?;
+    // a window of a protected or unidentifiable program embedded in this one as a child window is blacked out of the picture
+    guards::mask_embedded(&mut img, hwnd, frame);
     let mons = win::monitors();
     let scale = win::scale_for(frame.width);
     let changed = win::VIEW.lock().unwrap().hwnd != Some(hwnd.0 as isize);
@@ -446,10 +448,13 @@ fn list_apps(a: Value) -> Result<Vec<Content>, String> {
             }
             let exe = win::app_exe(h); // a Store app is listed under its own program, not ApplicationFrameHost
             running_exes.insert(exe.clone());
-            titles.push(win::normalize_title(&t));
             let note = if host { "   <- your AI app's own window (host: never read)" } else { "" };
             // the title of a security or password-manager window is not shown (it can name an account or a vault)
             let hidden = guards::hides_title(&exe);
+            // a protected or unidentifiable window must not mark an installed app as "running" through its title
+            if !hidden {
+                titles.push(win::normalize_title(&t));
+            }
             let title80: String = if hidden { win::HIDDEN_TITLE.to_string() } else { t.chars().take(80).collect() };
             lines.push(format!("  #{} {}: {:?}{note}", h.0 as isize, if exe.is_empty() { "?" } else { &exe }, title80));
             windows_data.push(json!({"id": h.0 as isize, "app": exe, "title": title80, "host": host}));

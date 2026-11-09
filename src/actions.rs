@@ -271,7 +271,7 @@ fn find_any(names: &[&str], scope: &str, source: Source, ocr: &mut OcrPoll) -> O
     if source != Source::Ocr {
         for name in names {
             if scope != "element" {
-                if let Some((_, t)) = win::match_visible_window(name) {
+                if let Some((_, t)) = win::match_window(name) {
                     return Some(t);
                 }
             }
@@ -283,7 +283,7 @@ fn find_any(names: &[&str], scope: &str, source: Source, ocr: &mut OcrPoll) -> O
         }
     } else if scope != "element" {
         for name in names {
-            if let Some((_, t)) = win::match_visible_window(name) {
+            if let Some((_, t)) = win::match_window(name) {
                 return Some(t);
             }
         }

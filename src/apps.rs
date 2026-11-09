@@ -161,6 +161,9 @@ pub enum Launch {
     Exe(String),
 }
 
+/// The longest app name or path `open_app` looks at (Windows' MAX_PATH).
+pub const MAX_NAME_CHARS: usize = 260;
+
 fn lower_stem(exe: &str) -> String {
     exe.trim_end_matches(".exe").to_string()
 }
@@ -284,6 +287,10 @@ pub fn check_resolved_exe(path: &str, allowed: &[String]) -> Result<(), String> 
 ///    searched for, because text typed there can run a command line.
 pub fn classify(name: &str, allowed: &[String]) -> Result<Launch, String> {
     let name = name.trim();
+    // before any matching (the closest-name search compares against every installed app): no program name or path is this long
+    if name.chars().count() > MAX_NAME_CHARS {
+        return Err(format!("refusing a name of {} characters: an app name or path is at most {MAX_NAME_CHARS} characters; {ASK_USER}", name.chars().count()));
+    }
     if let Some(why) = refusal(name) {
         return Err(why);
     }
@@ -465,6 +472,17 @@ mod tests {
         assert!(e.contains("not an installed app") && e.contains("nothing was typed"), "{e}");
         let e = not_installed("whatever", &["notepad.exe".to_string()]);
         assert!(e.contains("apps.allowed"), "{e}");
+    }
+
+    #[test]
+    fn a_name_over_260_characters_is_refused_before_any_matching() {
+        let long = "a".repeat(261);
+        let e = classify(&long, &[]).unwrap_err();
+        assert!(e.contains("261 characters") && !e.contains("installed app"), "{e}");
+        assert!(!e.contains(&long), "the long name is not echoed back");
+        // exactly 260 characters is still looked at (here: not an installed app)
+        let e = classify(&"b".repeat(260), &[]).unwrap_err();
+        assert!(!e.contains("at most 260"), "{e}");
     }
 
     #[test]

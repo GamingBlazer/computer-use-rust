@@ -287,24 +287,64 @@ fn wait_target_responsive(max_ms: u32) {
     }
 }
 
-/// Waits until the window in front is idle: it answers WM_NULL promptly three times in a row, 60 ms apart. A busy
-/// thread does not answer until it is back at its message loop, and input it received meanwhile (a Ctrl+V) is handled
-/// right after the first answer, which is why one answer is not enough. Gives up after `max`. True: idle.
-fn wait_target_idle(max: Duration) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_NULL};
+/// How a wait for an idle target ended.
+pub enum Idle {
+    /// the target answered promptly three times in a row
+    Idle,
+    /// the time ran out while it was still busy
+    TimedOut,
+    /// the user's stop or the client's cancellation came first (the text is what the guard said)
+    Aborted(String),
+}
+
+/// A window answered WM_NULL within 120 ms (a busy thread does not answer until it is back at its message loop).
+fn answers_promptly(h: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_NULL};
+    let t = Instant::now();
+    let answered = unsafe { SendMessageTimeoutW(h, WM_NULL, windows::Win32::Foundation::WPARAM(0), windows::Win32::Foundation::LPARAM(0), SMTO_ABORTIFHUNG, 150, None) }.0 != 0;
+    answered && t.elapsed() < Duration::from_millis(120)
+}
+
+/// The windows whose threads must be idle: the one in front and, when the focused control belongs to another thread than
+/// the window in front (an embedded or hosted control with its own thread), that control's window as well.
+fn idle_probe_windows() -> Vec<windows::Win32::Foundation::HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO};
+    let mut out = Vec::new();
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            return out;
+        }
+        out.push(fg);
+        let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        if GetGUIThreadInfo(0, &mut gti).is_ok() && !gti.hwndFocus.0.is_null() && gti.hwndFocus != fg {
+            if GetWindowThreadProcessId(gti.hwndFocus, None) != GetWindowThreadProcessId(fg, None) {
+                out.push(gti.hwndFocus);
+            }
+        }
+    }
+    out
+}
+
+/// Waits until the window in front, and the focused control's window when that belongs to another thread, are idle: each
+/// answers WM_NULL promptly three times in a row, 60 ms apart. A busy thread does not answer until it is back at its message
+/// loop, and input it received meanwhile (a Ctrl+V) is handled right after the first answer, which is why one answer is not
+/// enough. Gives up after `max`, and at once when the user's stop or the client's cancellation comes (checked between probes).
+fn wait_target_idle(max: Duration) -> Idle {
     let start = Instant::now();
     let mut in_a_row = 0;
     while start.elapsed() < max {
-        let fg = unsafe { GetForegroundWindow() };
-        if fg.0.is_null() {
-            return true; // nothing in front to be busy
+        if let Err(e) = crate::guards::check_failsafe() {
+            return Idle::Aborted(e);
         }
-        let t = Instant::now();
-        let answered = unsafe { SendMessageTimeoutW(fg, WM_NULL, windows::Win32::Foundation::WPARAM(0), windows::Win32::Foundation::LPARAM(0), SMTO_ABORTIFHUNG, 150, None) }.0 != 0;
-        if answered && t.elapsed() < Duration::from_millis(120) {
+        let targets = idle_probe_windows();
+        if targets.is_empty() {
+            return Idle::Idle; // nothing in front to be busy
+        }
+        if targets.iter().all(|h| answers_promptly(*h)) {
             in_a_row += 1;
             if in_a_row >= 3 {
-                return true;
+                return Idle::Idle;
             }
             std::thread::sleep(Duration::from_millis(60));
         } else {
@@ -312,7 +352,7 @@ fn wait_target_idle(max: Duration) -> bool {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    false
+    Idle::TimedOut
 }
 
 /// How long one typing may wait in total for a busy target before it gives the clipboard back anyway.
@@ -724,14 +764,22 @@ struct SavedClipboard {
     unconfirmed: bool,
     /// what is left of the wait for a busy target
     idle_left: Duration,
+    /// the wait was ended by a stop or a cancellation: no further waiting
+    aborted: bool,
 }
 
 impl SavedClipboard {
-    /// Wait (bounded, shared by the whole typing) until the target is idle. True when it is, or nothing is pending.
-    fn wait_idle(&mut self) -> bool {
+    /// Wait (bounded, shared by the whole typing) until the target is idle; a stop or cancellation ends the wait at once.
+    fn wait_idle(&mut self) -> Idle {
+        if self.aborted {
+            return Idle::Aborted(String::new());
+        }
         let t = Instant::now();
         let idle = wait_target_idle(self.idle_left);
         self.idle_left = self.idle_left.saturating_sub(t.elapsed());
+        if matches!(idle, Idle::Aborted(_)) {
+            self.aborted = true;
+        }
         idle
     }
 
@@ -739,8 +787,16 @@ impl SavedClipboard {
     fn restore(&mut self) -> Option<String> {
         let seq = self.ours.take()?;
         let mut busy_note = None;
-        if std::mem::take(&mut self.unconfirmed) && !self.wait_idle() {
-            busy_note = Some("the target was still busy after the wait, so your clipboard was put back while it may still have been about to paste; check what it shows".to_string());
+        if std::mem::take(&mut self.unconfirmed) {
+            match self.wait_idle() {
+                Idle::Idle => {}
+                Idle::TimedOut => {
+                    busy_note = Some("the target was still busy after the wait, so your clipboard was put back while it may still have been about to paste; check what it shows".to_string());
+                }
+                Idle::Aborted(_) => {
+                    busy_note = Some("the wait for the target to finish was ended by a stop or a cancellation, so your clipboard was put back while the target may still have been about to paste; check what it shows".to_string());
+                }
+            }
         }
         if unsafe { GetClipboardSequenceNumber() } != seq {
             return Some("the clipboard was changed by another app while typing, so your previous clipboard content was not restored".into());
@@ -785,7 +841,7 @@ pub fn paste_lines(
     }
     let items = clipboard_items();
     unsafe { let _ = CloseClipboard(); }
-    let mut saved = SavedClipboard { items, ours: None, unconfirmed: false, idle_left: IDLE_BUDGET };
+    let mut saved = SavedClipboard { items, ours: None, unconfirmed: false, idle_left: IDLE_BUDGET, aborted: false };
     for n in from..lines.len() {
         check().map_err(Stop::Check)?;
         let line = lines[n];
@@ -837,8 +893,18 @@ pub fn paste_lines(
                 }
             } else {
                 saved.unconfirmed = true;
-                saved.wait_idle();
+                let waited = saved.wait_idle();
                 prog.chars += line.chars().count();
+                if let Idle::Aborted(why) = waited {
+                    // the stop or the cancellation ends the wait (and the typing) at once: the clipboard goes back, the result says so
+                    prog.lines = n + 1;
+                    if let Some(note) = saved.restore() {
+                        if !prog.notes.contains(&note) {
+                            prog.notes.push(note);
+                        }
+                    }
+                    return Err(Stop::Check(why));
+                }
             }
         }
         prog.lines = n + 1;

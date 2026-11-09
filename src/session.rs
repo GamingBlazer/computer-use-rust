@@ -40,9 +40,11 @@ pub fn turn_ended(since: SystemTime) -> bool {
     std::fs::metadata(turn_ended_path()).and_then(|m| m.modified()).map(|t| t > since).unwrap_or(false)
 }
 
-/// The turn-ended file was touched after `ms` (unix milliseconds).
-pub fn turn_ended_since_ms(ms: u64) -> bool {
-    turn_ended(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
+/// When the turn-ended file was last touched (unix milliseconds), if that was after `since_ms`.
+pub fn turn_ended_at_ms(since_ms: u64) -> Option<u64> {
+    let t = std::fs::metadata(turn_ended_path()).and_then(|m| m.modified()).ok()?;
+    let ms = t.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as u64;
+    (ms > since_ms).then_some(ms)
 }
 
 /// `desktop-control.exe turn-ended`: create the turn-ended file next to the exe if needed and set its
@@ -83,6 +85,12 @@ pub fn touch() -> bool {
         guards::acknowledge();
         crate::uia::clear_elements();
         crate::overlay::show();
+    }
+    // the AI app's windows for the hooks (the fallback window is known by now). Outside the task lock: it enumerates and
+    // queries windows, which must never happen while a lock the overlay thread waits for is held.
+    drop(t);
+    if starting {
+        home::refresh_host_cache();
     }
     starting
 }
