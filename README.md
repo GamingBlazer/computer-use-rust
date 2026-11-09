@@ -179,11 +179,37 @@ An AI driving your real desktop must be easy to stop and impossible to misuse qu
 
 ## ⚡ Quick start
 
-1. **Get the program**: build it from source ([BUILD.md](BUILD.md)) or, once published, download it from [Releases](https://github.com/GamingBlazer/computer-use-rust/releases). Put it somewhere permanent, e.g. `C:\Tools\computer-use\`.
-2. **Connect it** to your AI client (below).
-3. Ask: *"Open Notepad and write a haiku about Rust."* Then watch the indicator. Press **Esc** any time to stop.
+1. **Download** from the [latest release](https://github.com/GamingBlazer/computer-use-rust/releases/latest), or build it from source ([BUILD.md](BUILD.md)).
+2. **Install**: put `desktop-control.exe` in a permanent folder, e.g. `C:\Tools\computer-use\` (step-by-step guide below).
+3. **Connect it** to your AI client (below).
+4. Ask: *"Open Notepad and write a haiku about Rust."* Then watch the indicator. Press **Esc** any time to stop.
 
 No installer, no runtime, no admin rights needed.
+
+### 📦 Installation guide
+
+Download from the [latest release](https://github.com/GamingBlazer/computer-use-rust/releases/latest) in either form; both contain the same program.
+
+**Method 1: the `.exe`**
+
+1. Download `desktop-control.exe`.
+2. Right-click it → **Properties** → tick **Unblock** → **OK**.
+3. Move it to a permanent folder, e.g. `C:\Tools\computer-use\`.
+
+**Method 2: the `.zip`**
+
+1. Download `computer-use-rust-<version>-windows-x64.zip`.
+2. Right-click it → **Properties** → tick **Unblock** → **OK** (do this before extracting).
+3. Right-click → **Extract All…** and choose a permanent folder, e.g. `C:\Tools\computer-use\`.
+   From a terminal: `tar -xf computer-use-rust-<version>-windows-x64.zip -C C:\Tools\computer-use`
+4. The folder now holds `desktop-control.exe`, `INSTALL.txt`, `config.example.json`, this README and the license.
+
+Then **connect it** to your AI client (next section), using the full path, e.g. `C:\Tools\computer-use\desktop-control.exe`.
+
+- **Check the download** *(optional)*: `Get-FileHash <file>` in PowerShell must match `SHA256SUMS.txt` on the release page.
+- **Optional settings**: copy `config.example.json` to `config.json` next to the exe (see Configuration below).
+- **Update**: disconnect the server in your AI client, replace `desktop-control.exe`, then reconnect (in Claude Code, `/mcp`).
+- **Uninstall**: remove the server from your AI client and delete the folder. Nothing else is installed.
 
 ### 🔌 Connect your AI client
 
