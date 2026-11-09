@@ -17,6 +17,10 @@
 > 🚧 **Pre-release (v0.3.4).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
 > called `desktop-control.exe`; it becomes `computer-use.exe` at release.
 
+<img src="docs/demo.gif" alt="Demo: an AI agent opens Edge, looks up Rust on Wikipedia and writes a short summary in WordPad with Computer Use (Rust)" width="900">
+
+<sub>Real run, not sped up except two idle pauses: Edge, Wikipedia search, scrolling, then WordPad. Two <code>run_script</code> calls do most of the work.</sub>
+
 **[What is it?](#-what-is-computer-use-rust)** · **[Why it's different](#-why-its-different)** · **[All features](#-all-features)** · **[Benchmarks](#-benchmarks)** · **[Quick start](#-quick-start)** · **[Safety](#%EF%B8%8F-safety-first)** · **[FAQ](#-faq)**
 
 ### ⭐ If Computer Use (Rust) saves you time, please [star the repo](https://github.com/GamingBlazer/computer-use-rust/stargazers). It helps others find it! ⭐
