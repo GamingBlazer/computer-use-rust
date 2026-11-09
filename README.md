@@ -17,7 +17,10 @@
 > 🚧 **Pre-release (v0.3.4).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
 > called `desktop-control.exe`; it becomes `computer-use.exe` at release.
 
-<img src="docs/demo.gif" alt="Demo: an AI agent opens several sites in Edge tabs, looks up Rust on Wikipedia, closes the extra tabs and writes a short summary in WordPad with Computer Use (Rust)" width="900">
+<picture>
+  <source srcset="docs/demo.webp" type="image/webp">
+  <img src="docs/demo.gif" alt="Demo: an AI agent opens several sites in Edge tabs, looks up Rust on Wikipedia, closes the extra tabs and writes a short summary in WordPad with Computer Use (Rust)" width="900">
+</picture>
 
 <sub>Real run: three sites opened in tabs, a Wikipedia search, the extra tabs closed, then a summary typed in WordPad. Only idle waits (page loads, pauses) play at 3x speed.</sub>
 
