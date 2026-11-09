@@ -1,0 +1,13 @@
+[
+  {"tool": "open_app",      "args": {"name": "Notepad"}},
+  {"tool": "screenshot",    "args": {"window": "Notepad"}},
+  {"tool": "type_text",     "args": {"text": "Hello from the bench.\nSecond line of text."}},
+  {"tool": "press_keys",    "args": {"keys": ["ctrl+End"]}},
+  {"tool": "list_elements", "args": {}},
+  {"tool": "read_text",     "args": {}},
+  {"tool": "press_keys",    "args": {"keys": ["ctrl+a"], "screenshot_after": false}},
+  {"tool": "press_keys",    "args": {"keys": ["delete"], "screenshot_after": false}},
+  {"tool": "press_keys",    "args": {"keys": ["alt+F4"], "screenshot_after": false}},
+  {"tool": "run_actions",   "args": {"actions": [{"action": "wait_gone", "name": "Untitled - Notepad", "timeout": 5, "scope": "window"}], "screenshot_after": false}},
+  {"tool": "finish",        "args": {"summary": "bench done"}}
+]

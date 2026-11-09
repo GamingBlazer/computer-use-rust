@@ -1,0 +1,53 @@
+bench bench/notepad_script.json: 2 steps x 3 run(s)
+--- run 1/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+capture: borderless access status 4 (4 = allowed, 2 = denied by user)
+capture: border required = Ok(false)
+       | Script finished: 10 action(s) in 2.2 s.
+       | Returned: 77
+       | 1 screenshot(s) follow.
+       | Active window now: ◐ Claude Code
+       | Focused: [Text] "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_"
+       | Changes: none detected in the interactive controls (take a screenshot if the page content may have changed).
+  1  run_script        2390     1  847x1018                1150     290  
+capture: closed the Window(3016176) session (task ended)
+task completed (Finish): Indicator hidden, but the VS Code window wasn't found to switch back to.
+       | Indicator hidden, but the VS Code window wasn't found to switch back to.
+  2  finish              25     0                             0      72  
+run 1 wall time: 2416 ms
+--- run 2/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+       | Script finished: 10 action(s) in 1.5 s.
+       | Returned: 77
+       | 1 screenshot(s) follow.
+       | Active window now: ◑ Claude Code
+       | Focused: [Text] "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_"
+       | Changes (+ added, - removed, ~ changed):
+       |   + [TabItem] "◑ Claude Code" [selected]
+       |   - [TabItem] "◐ Claude Code" [selected]
+  1  run_script        1663     1  847x1018                1150     304  
+capture: closed the Window(3802860) session (task ended)
+task completed (Finish): Indicator hidden, but the VS Code window wasn't found to switch back to.
+       | Indicator hidden, but the VS Code window wasn't found to switch back to.
+  2  finish              38     0                             0      72  
+run 2 wall time: 1701 ms
+--- run 3/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+       | Script finished: 10 action(s) in 1.5 s.
+       | Returned: 77
+       | 1 screenshot(s) follow.
+       | Active window now: ◐ Claude Code
+       | Focused: [Text] "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_"
+       | Changes (+ added, - removed, ~ changed):
+       |   + [TabItem] "◐ Claude Code" [selected]
+       |   - [TabItem] "◑ Claude Code" [selected]
+  1  run_script        1658     1  847x1018                1150     304  
+capture: closed the Window(4654660) session (task ended)
+task completed (Finish): Indicator hidden, but the VS Code window wasn't found to switch back to.
+       | Indicator hidden, but the VS Code window wasn't found to switch back to.
+  2  finish              37     0                             0      72  
+run 3 wall time: 1695 ms
+=== totals over 3 run(s), 6 steps
+TOTAL ms=5810 images=3 est_image_tokens=3449 text_chars=1114 errors=0
+PER RUN avg ms=1937 images=1.0 est_image_tokens=1150 text_chars=371 (sum of step times; wall avg 1937 ms)
+PER STEP avg ms=968.4

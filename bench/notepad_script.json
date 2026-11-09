@@ -1,0 +1,4 @@
+[
+  {"tool": "run_script", "args": {"script": "open_app(\"Notepad\");\nscreenshot(#{window: \"Notepad\"});\ntype_text(\"Hello from the bench.\\nSecond line of text.\");\npress_keys(\"ctrl+End\");\nlet els = list_elements();\nlet typed = read_text();\npress_keys(\"ctrl+a\");\npress_keys(\"delete\");\npress_keys(\"alt+F4\");\nwait_gone(\"Untitled - Notepad\", #{scope: \"window\", timeout: 5});\ntyped.len\n"}},
+  {"tool": "finish", "args": {"summary": "bench done"}}
+]

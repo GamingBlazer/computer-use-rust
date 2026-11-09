@@ -1,0 +1,56 @@
+home window: source none, pids [9796, 13444], exact [], homeApp None
+bench bench/notepad.json: 11 steps x 3 run(s)
+--- run 1/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+capture: borderless access status 4 (4 = allowed, 2 = denied by user)
+capture: border required = Ok(false)
+  1  open_app          2073     0                             0     817  
+  2  screenshot          54     1  847x1018                1150     171  
+  3  type_text          356     0                             0     411  
+  4  press_keys         234     0                             0     258  
+  5  list_elements      114     0                             0    1511  
+  6  read_text            5     0                             0      77  
+  7  press_keys          73     0                             0     147  
+  8  press_keys          42     0                             0      86  
+  9  press_keys         111     0                             0      47  
+ 10  run_actions         62     0                             0      93  
+capture: closed the Window(8324640) session (task ended)
+task completed (Finish): Indicator hidden; you are already in "...".
+ 11  finish               8     0                             0      53  
+run 1 wall time: 3133 ms
+--- run 2/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+  1  open_app          1333     0                             0     817  
+  2  screenshot          54     1  847x1018                1150     171  
+  3  type_text          360     0                             0     411  
+  4  press_keys         248     0                             0     258  
+  5  list_elements      114     0                             0    1511  
+  6  read_text            6     0                             0      77  
+  7  press_keys          73     0                             0     147  
+  8  press_keys          43     0                             0      86  
+  9  press_keys         110     0                             0      47  
+ 10  run_actions         63     0                             0      93  
+capture: closed the Window(19268076) session (task ended)
+task completed (Finish): Indicator hidden; you are already in "...".
+ 11  finish              12     0                             0      53  
+run 2 wall time: 2417 ms
+--- run 3/3
+  #  tool                ms  imgs  image px             est_tok   chars  note
+  1  open_app          1288     0                             0     817  
+  2  screenshot          55     1  847x1018                1150     171  
+  3  type_text          358     0                             0     411  
+  4  press_keys         233     0                             0     258  
+  5  list_elements      108     0                             0    1511  
+  6  read_text            4     0                             0      77  
+  7  press_keys          73     0                             0     147  
+  8  press_keys          42     0                             0      86  
+  9  press_keys         118     0                             0      47  
+ 10  run_actions         61     0                             0      93  
+capture: closed the Window(11208006) session (task ended)
+task completed (Finish): Indicator hidden; you are already in "...".
+ 11  finish              10     0                             0      53  
+run 3 wall time: 2350 ms
+=== totals over 3 run(s), 33 steps
+TOTAL ms=7897 images=3 est_image_tokens=3449 text_chars=11013 errors=0
+PER RUN avg ms=2632 images=1.0 est_image_tokens=1150 text_chars=3671 (sum of step times; wall avg 2633 ms)
+PER STEP avg ms=239.3
