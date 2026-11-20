@@ -31,10 +31,11 @@ use windows::Win32::Graphics::DirectWrite::{
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Composition::{ICompositionDrawingSurfaceInterop, ICompositorDesktopInterop, ICompositorInterop};
 use windows::Win32::System::WinRT::{CreateDispatcherQueueController, DispatcherQueueOptions, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT};
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::Graphics::Gdi::HMONITOR;
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, PeekMessageW, RegisterClassW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW, RegisterClassW,
     SetWindowDisplayAffinity, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage, HWND_TOPMOST, MSG,
     PM_REMOVE, SPI_SETCURSORS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNA, WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
@@ -282,6 +283,42 @@ fn class() -> PCWSTR {
     PCWSTR(name.as_ptr())
 }
 
+impl Drop for Layer {
+    fn drop(&mut self) {
+        // layers are rebuilt when the display layout changes: never leave a stale window behind
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+        }
+    }
+}
+
+/// The display layout the layers were built for: each monitor's rectangle and effective DPI.
+/// A manual resolution or scale change alters it, and the layers must then be rebuilt, or the
+/// old windows keep their old size and scale and Windows stretches them.
+fn layout() -> Vec<(Rect, u32)> {
+    win::monitors()
+        .iter()
+        .map(|m| {
+            let (mut x, mut y) = (96u32, 96u32);
+            unsafe {
+                let _ = GetDpiForMonitor(HMONITOR(m.handle as *mut c_void), MDT_EFFECTIVE_DPI, &mut x, &mut y);
+            }
+            (m.rect, x)
+        })
+        .collect()
+}
+
+fn build_layers(compositor: &Compositor, gfx: &Gfx, capturable: bool, accent: &str, title: &str, status: &str, esc: &str) -> windows::core::Result<Vec<Layer>> {
+    let mut layers = Vec::new();
+    for m in win::monitors() {
+        let mut l = Layer::new(compositor, gfx, m.rect, capturable)?;
+        l.set_accent(compositor, accent)?;
+        l.set_pill(gfx, title, Some(status), Some(esc), accent, true)?;
+        layers.push(l);
+    }
+    Ok(layers)
+}
+
 impl Layer {
     fn new(compositor: &Compositor, gfx: &Gfx, rect: Rect, capturable: bool) -> windows::core::Result<Layer> {
         let hwnd = unsafe {
@@ -527,19 +564,15 @@ fn run(rx: Receiver<Msg>) -> windows::core::Result<()> {
     let mut accent = accent();
     let mut title_text = crate::client::using_text();
     let esc_text = string("escToCancel", "Esc to cancel");
-    let mut layers: Vec<Layer> = Vec::new();
-    for m in win::monitors() {
-        let mut l = Layer::new(&compositor, &gfx, m.rect, capturable)?;
-        l.set_accent(&compositor, &accent)?;
-        l.set_pill(&gfx, &title_text, Some("thinking…"), Some(&esc_text), &accent, true)?;
-        layers.push(l);
-    }
+    let mut built_for = layout();
+    let mut layers = build_layers(&compositor, &gfx, capturable, &accent, &title_text, "thinking…", &esc_text)?;
     READY.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let mut mode = Mode::Hidden;
     let mut current: usize = 0; // layer holding the pill
     let mut used: Vec<usize> = Vec::new();
     let mut status_text = "thinking…".to_string();
+    let mut end_pill: Option<(String, String)> = None; // the banner shown while Ending
     let mut until = Instant::now();
     let mut msg = MSG::default();
     let mut last_poll = Instant::now();
@@ -608,6 +641,7 @@ fn run(rx: Receiver<Msg>) -> windows::core::Result<()> {
                 Msg::End(text, col, ms) => {
                     let text: String = text.chars().take(90).collect();
                     layers[current].set_pill(&gfx, &text, None, None, &col, false)?;
+                    end_pill = Some((text, col));
                     if !used.contains(&current) {
                         used.push(current);
                     }
@@ -623,6 +657,31 @@ fn run(rx: Receiver<Msg>) -> windows::core::Result<()> {
         if last_poll.elapsed() >= Duration::from_millis(100) {
             last_poll = Instant::now();
             crate::hooks::poll_stop();
+            // the user changed the resolution, scale or monitor set: rebuild the windows to fit
+            let now_layout = layout();
+            if now_layout != built_for && !now_layout.is_empty() {
+                match build_layers(&compositor, &gfx, capturable, &accent, &title_text, &status_text, &esc_text) {
+                    Ok(fresh) => {
+                        layers = fresh; // the old layers drop here and destroy their windows
+                        built_for = now_layout;
+                        let mons = win::monitors();
+                        current = win::follow(&mons).min(layers.len() - 1);
+                        used = vec![current];
+                        match mode {
+                            Mode::Working => set_visible(&layers, &used, current, true),
+                            Mode::Ending => {
+                                if let Some((t, c)) = &end_pill {
+                                    let _ = layers[current].set_pill(&gfx, t, None, None, c, false);
+                                }
+                                set_visible(&layers, &used, current, true);
+                            }
+                            Mode::Hidden => {}
+                        }
+                    }
+                    // mid-change the display can refuse new windows: retry on the next tick
+                    Err(e) => eprintln!("overlay: rebuild after display change failed: {e}"),
+                }
+            }
             if mode == Mode::Working {
                 // the task is over when the turn ended (like finish) or after 30 s without a call
                 if let Some(ended) = session::poll_end() {

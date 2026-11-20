@@ -144,6 +144,37 @@ pub fn check_takeover() -> Result<(), String> {
     Ok(())
 }
 
+/// The monitor layout last seen by the corner check, when it last changed, and where the pointer
+/// was at that moment.
+struct DisplayWatch {
+    rects: Vec<win::Rect>,
+    changed: Option<std::time::Instant>,
+    pos_at_change: Option<(i32, i32)>,
+}
+static DISPLAY_WATCH: crate::sync::Mutex<Option<DisplayWatch>> = crate::sync::Mutex::new(None);
+const DISPLAY_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// A resolution change clamps the pointer to the new screen edges, which can park it exactly on a
+/// corner without the user touching the mouse. So the corner stop is skipped for a few seconds after
+/// the monitor layout changes, and for as long as the pointer stays where the change left it.
+fn display_change_grace(mons: &[win::Monitor], x: i32, y: i32) -> bool {
+    let rects: Vec<win::Rect> = mons.iter().map(|m| m.rect).collect();
+    let mut guard = DISPLAY_WATCH.lock().unwrap();
+    let w = guard.get_or_insert_with(|| DisplayWatch { rects: rects.clone(), changed: None, pos_at_change: None });
+    if w.rects != rects {
+        w.rects = rects;
+        w.changed = Some(std::time::Instant::now());
+        w.pos_at_change = Some((x, y));
+    }
+    let recent = w.changed.is_some_and(|t| t.elapsed() < DISPLAY_GRACE);
+    if w.pos_at_change == Some((x, y)) {
+        return true;
+    }
+    // the pointer has moved since the change: from now on (after the grace) corners count again
+    w.pos_at_change = None;
+    recent
+}
+
 /// Esc (physical, seen by the hook) or the pointer slammed into an outer screen corner.
 pub fn check_failsafe() -> Result<(), String> {
     if hooks::STOP.load(Ordering::Relaxed) && !hooks::try_clear_stop() {
@@ -154,6 +185,9 @@ pub fn check_failsafe() -> Result<(), String> {
     }
     let (x, y) = input::cursor_pos();
     let mons = win::monitors();
+    if display_change_grace(&mons, x, y) {
+        return Ok(());
+    }
     for m in &mons {
         let r = m.rect;
         for (cx, cy, dx, dy) in [(r.left, r.top, -1, -1), (r.right(), r.top, 1, -1), (r.left, r.bottom(), -1, 1), (r.right(), r.bottom(), 1, 1)] {
