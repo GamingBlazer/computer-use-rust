@@ -14,7 +14,7 @@
 ![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange)
 [![GitHub stars](https://img.shields.io/github/stars/GamingBlazer/computer-use-rust?style=social)](https://github.com/GamingBlazer/computer-use-rust/stargazers)
 
-> 🚧 **Pre-release (v0.3.4).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
+> 🚧 **Pre-release (v0.3.5).** Everything below works today unless marked *planned*. Until v1.0 the program file is still
 > called `desktop-control.exe`; it becomes `computer-use.exe` at release.
 
 <picture>
